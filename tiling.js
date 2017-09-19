@@ -22,37 +22,6 @@ margin_tb = 2
 
 stack_margin = 75
 
-function _repl() {
-    add_all_from_workspace()
-
-    meta_window = global.display.focus_window;
-    workspace = meta_window.get_workspace();
-    window_actor = meta_window.get_compositor_private();
-
-    set_action_handler("toggle-scratch-layer", () => { print("It works!"); });
-
-    meta_window = pages[0]
-//: [object instance proxy GType:MetaWindowX11 jsobj@0x7f8c39e52f70 native@0x3d43880]
-    workspace = meta_window.get_workspace()
-//: [object instance proxy GIName:Meta.Workspace jsobj@0x7f8c47166790 native@0x23b5360]
-
-    actor = meta_window.get_compositor_private()
-
-    St = imports.gi.St;
-    St.set_slow_down_factor(1);
-    St.set_slow_down_factor(3);
-
-    actor.z_position
-
-    meta = imports.gi.Meta
-    meta_window.get_layer()
-
-    // Use to control the stack level
-    meta_window.raise()
-    meta_window.lower()
-
-}
-
 debug_all = true; // Consider the default value in `debug_filter` to be true
 debug_filter = { "#preview": false };
 debug = () => {
@@ -217,25 +186,6 @@ framestr = (rect) => {
     return "[ x:"+rect.x + ", y:" + rect.y + " w:" + rect.width + " h:"+rect.height + " ]";
 }
 
-focus_handler = (meta_window, user_data) => {
-    debug("focus:", meta_window.title, framestr(meta_window.get_frame_rect()));
-
-    if(meta_window.scrollwm_initial_position) {
-        debug("setting initial position", meta_window.scrollwm_initial_position)
-        if (meta_window.get_maximized() == Meta.MaximizeFlags.BOTH) {
-            meta_window.unmaximize(Meta.MaximizeFlags.BOTH);
-            toggle_maximize_horizontally(meta_window);
-            return;
-        }
-        let frame = meta_window.get_frame_rect();
-        meta_window.move_resize_frame(true, meta_window.scrollwm_initial_position.x, meta_window.scrollwm_initial_position.y, frame.width, frame.height)
-        ensure_viewport(meta_window);
-        delete meta_window.scrollwm_initial_position;
-    } else {
-        ensure_viewport(meta_window)
-    }
-}
-
 // Place window's left edge at x
 propogate_forward = (space, n, x, lower, gap) => {
     if (n < 0 || n >= space.stack.length)
@@ -274,10 +224,6 @@ center = (meta_window, zen) => {
     propogate_forward(i + 1, right);
     propogate_backward(i - 1, left);
 }
-focus_wrapper = (meta_window, user_data) => {
-    focus_handler(meta_window, user_data)
-}
-
 add_filter = (meta_window) => {
     if (meta_window.window_type != Meta.WindowType.NORMAL ||
         meta_window.get_transient_for() != null) {
@@ -356,62 +302,6 @@ as_key_handler = function(fn) {
         return fn(meta_window);
     }
 }
-
-first_frame = (meta_window_actor) => {
-    meta_window_actor.disconnect('first_frame');
-    let meta_window = meta_window_actor.meta_window;
-    debug("first frame: setting initial position", meta_window)
-    if(meta_window.scrollwm_initial_position) {
-        debug("setting initial position", meta_window.scrollwm_initial_position)
-        if (meta_window.get_maximized() == Meta.MaximizeFlags.BOTH) {
-            meta_window.unmaximize(Meta.MaximizeFlags.BOTH);
-            toggle_maximize_horizontally(meta_window);
-            return;
-        }
-        let frame = meta_window.get_frame_rect();
-        meta_window.move_resize_frame(true, meta_window.scrollwm_initial_position.x, meta_window.scrollwm_initial_position.y, frame.width, frame.height)
-
-        let space = spaces.spaceOf(meta_window);
-        propogate_forward(space, space.indexOf(meta_window) + 1, meta_window.scrollwm_initial_position.x + frame.width + window_gap);
-
-        delete meta_window.scrollwm_initial_position;
-    }
-}
-
-window_created = (display, meta_window, user_data) => {
-    debug('window-created', meta_window.title);
-    let actor = meta_window.get_compositor_private();
-    actor.connect('first-frame', dynamic_function_ref('first_frame'));
-}
-
-global.display.connect('window-created', dynamic_function_ref('window_created'));
-
-workspace_added = (screen, index) => {
-    let workspace = global.screen.get_workspace_by_index(index);
-    spaces.add(workspace);
-    debug('workspace-added', index, workspace);
-
-}
-// Doesn't seem to trigger for some reason
-workspace_removed = (screen, arg1, arg2) => {
-    debug('workspace-removed');
-    let workspace = global.screen.get_workspace_by_index(index);
-    spaces.remove(workspace);
-}
-
-global.screen.connect("workspace-added", dynamic_function_ref('workspace_added'))
-global.screen.connect("workspace-removed", dynamic_function_ref('workspace_removed'));
-
-// recover_all_tilings = function() {
-//     for (let i=0; i < global.screen.n_workspaces; i++) {
-//         let workspace = global.screen.get_workspace_by_index(i)
-//         print("workspace: " + workspace)
-//         workspace.connect("window-added", dynamic_function_ref("add_handler"))
-//         workspace.connect("window-removed", dynamic_function_ref("remove_handler"));
-//         add_all_from_workspace(workspace);
-//     }
-// }
-// recover_all_tilings();
 
 move_helper = (meta_window, delta) => {
     // NB: delta should be 1 or -1
@@ -656,6 +546,10 @@ Spaces = new Lang.Class({
             let workspace = global.screen.get_workspace_by_index(i);
             this.spaces[i] = new Space(workspace);
         }
+
+        global.screen.connect("workspace-added", Lang.bind(this, this.workspace_added))
+        global.screen.connect("workspace-removed", Lang.bind(this, this.workspace_removed));
+
     },
 
     add: function(workspace) {
@@ -669,33 +563,74 @@ Spaces = new Lang.Class({
     spaceOf: function(meta_window) {
         let workspace = meta_window.get_workspace();
         return this.spaces[workspace.workspace_index];
+    },
+
+    workspace_added: function(screen, index) {
+        let workspace = global.screen.get_workspace_by_index(index);
+        spaces.add(workspace);
+        debug('workspace-added', index, workspace);
+
+    },
+
+    // Doesn't seem to trigger for some reason
+    workspace_removed: function(screen, arg1, arg2) {
+        debug('workspace-removed');
+        let workspace = global.screen.get_workspace_by_index(index);
+        spaces.remove(workspace);
+    },
+
+    first_frame: function(meta_window_actor) {
+        meta_window_actor.disconnect('first_frame');
+        let meta_window = meta_window_actor.meta_window;
+        debug("first frame: setting initial position", meta_window)
+        if(meta_window.scrollwm_initial_position) {
+            debug("setting initial position", meta_window.scrollwm_initial_position)
+            if (meta_window.get_maximized() == Meta.MaximizeFlags.BOTH) {
+                meta_window.unmaximize(Meta.MaximizeFlags.BOTH);
+                toggle_maximize_horizontally(meta_window);
+                return;
+            }
+            let frame = meta_window.get_frame_rect();
+            meta_window.move_resize_frame(true, meta_window.scrollwm_initial_position.x, meta_window.scrollwm_initial_position.y, frame.width, frame.height)
+
+            let space = spaces.spaceOf(meta_window);
+            propogate_forward(space, space.indexOf(meta_window) + 1, meta_window.scrollwm_initial_position.x + frame.width + window_gap);
+
+            delete meta_window.scrollwm_initial_position;
+        }
+    },
+
+    window_created: function(display, meta_window, user_data) {
+        debug('window-created', meta_window.title);
+        let actor = meta_window.get_compositor_private();
+        actor.connect('first-frame', dynamic_function_ref('first_frame'));
     }
 })
 
 Space = new Lang.Class({
     Name: 'Space',
 
-    // The stack of windows
-    stack: [],
-
-    // The associated MetaWorkspace
-    workspace: undefined,
-
-    // The workspace index
-    index: undefined,
-
-    // index of the last window on the left stack
-    leftStack: 0,
-
-    // index of the first window on the right stack
-    rightStack: 0,
-
     _init: function(workspace) {
+
+        // The stack of windows
+        this.stack = [];
+
+        // The associated MetaWorkspace
+        this.workspace = workspace;
+
+        // The workspace index
+
+        // index of the last window on the left stack
+        this.leftStack = 0;
+
+        // index of the first window on the right stack
+        this.rightStack = 0;
+
         this.workspace = workspace;
         this.index = workspace.workspace_index;
         // connect signals
         workspace.connect("window-added", Lang.bind(this, this.windowAdded))
-        workspace.connect("window-removed", Lang.bind(this, this.windowAdded));
+        workspace.connect("window-removed", Lang.bind(this, this.windowRemoved));
         this._recover();
     },
 
@@ -716,7 +651,7 @@ Space = new Lang.Class({
     },
 
     removeWindow: function(meta_window) {
-        this.stack.splice(this.indexOf(meta_window), 1, meta_window);
+        this.stack.splice(this.indexOf(meta_window), 1);
     },
 
     swap: function(i, j) {
@@ -769,13 +704,12 @@ Space = new Lang.Class({
         let focus_i = focus();
 
         // Should inspert at index 0 if focus() returns -1
-        let space = this.space;
-        space.insertWindow(meta_window, focus_i + 1);
+        this.insertWindow(meta_window, focus_i + 1);
 
         if (focus_i == -1) {
             meta_window.scrollwm_initial_position = {x: 0, y:statusbar_height + margin_tb};
         } else {
-            let frame = space.getWindow(focus_i).get_frame_rect()
+            let frame = this.getWindow(focus_i).get_frame_rect()
             meta_window.scrollwm_initial_position = {x:frame.x + frame.width + window_gap, y:statusbar_height + margin_tb};
         }
         // If window is receiving focus the focus handler will do the correct thing.
@@ -787,7 +721,7 @@ Space = new Lang.Class({
         // Maxmize height. Setting position here doesn't work... 
         meta_window.move_resize_frame(true, 0, 0,
                                       meta_window.get_frame_rect().width, global.screen_height - statusbar_height - margin_tb*2);
-        meta_window.connect("focus", focus_wrapper)
+        meta_window.connect("focus", Lang.bind(this, this.focusHandler));
     },
 
     windowRemoved: function(ws, meta_window) {
@@ -795,21 +729,21 @@ Space = new Lang.Class({
         // Note: If `meta_window` was closed and had focus at the time, the next
         // window has already received the `focus` signal at this point.
 
-        let space = this.space;
-        let removed_i = space.indexOf(meta_window)
+        let removed_i = this.indexOf(meta_window)
+        debug('remove', removed_i)
         if (removed_i < 0)
             return
-        space.removeWindow(meta_window)
+        this.removeWindow(meta_window)
 
         // Remove our signal handlers: Needed for non-closed windows.
         // (closing a window seems to clean out it's signal handlers)
-        meta_window.disconnect(focus_wrapper);
+        meta_window.disconnect(this.focusHandler);
 
         // Re-layout: Needed if the removed window didn't have focus.
         // Not sure if we can check if that was the case or not?
-        space.getWindow(Math.max(0, removed_i - 1)).activate(timestamp());
+        this.getWindow(Math.max(0, removed_i - 1)).activate(timestamp());
         // Force a new ensure, since the focus_handler is run before window-removed
-        ensure_viewport(space.getWindow(focus()), true)
+        ensure_viewport(this.getWindow(this.focus()), true)
     },
 
     _recover: function() {
@@ -862,13 +796,29 @@ Space = new Lang.Class({
             if(this.indexOf(meta_window) < 0 && add_filter(meta_window)) {
                 // Using add_handler is unreliable since it interacts with focus.
                 this.insertWindow(meta_window);
-                meta_window.connect("focus", focus_wrapper)
+                meta_window.connect("focus", Lang.bind(this, this.focusHandler));
             }
         })
-    }
+    },
 
+    focusHandler: function(meta_window, user_data) {
+        debug("focus:", meta_window.title, framestr(meta_window.get_frame_rect()));
 
-
+        if(meta_window.scrollwm_initial_position) {
+            debug("setting initial position", meta_window.scrollwm_initial_position)
+            if (meta_window.get_maximized() == Meta.MaximizeFlags.BOTH) {
+                meta_window.unmaximize(Meta.MaximizeFlags.BOTH);
+                toggle_maximize_horizontally(meta_window);
+                return;
+            }
+            let frame = meta_window.get_frame_rect();
+            meta_window.move_resize_frame(true, meta_window.scrollwm_initial_position.x, meta_window.scrollwm_initial_position.y, frame.width, frame.height)
+            ensure_viewport(meta_window);
+            delete meta_window.scrollwm_initial_position;
+        } else {
+            this.moveIntoView(meta_window);
+        }
+    },
 })
 
 spaces = new Spaces();
