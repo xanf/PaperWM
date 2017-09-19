@@ -307,7 +307,7 @@ move_helper = (meta_window, delta) => {
     // NB: delta should be 1 or -1
     let space = spaces.spaceOf(meta_window);
     let i = space.indexOf(meta_window)
-    space.swap(i, i+delta);
+    space.swap(i, i+delta) && space.moveIntoView(meta_window, true);
 }
 move_right = () => {
     move_helper(global.display.focus_window, 1);
@@ -634,8 +634,8 @@ Space = new Lang.Class({
         this._recover();
     },
 
-    moveIntoView: function(meta_window) {
-        ensure_viewport(meta_window);
+    moveIntoView: function(meta_window, force) {
+        ensure_viewport(meta_window, force);
     },
 
     // Get the index right of meta_window's index
@@ -655,16 +655,17 @@ Space = new Lang.Class({
     },
 
     swap: function(i, j) {
-        if (!inBound(i, j)) {
-            return false;
+        if (this.inBound(i) && this.inBound(j)) {
+            let stack = this.stack;
+            let temp = stack[i];
+            stack[i] = stack[j];
+            stack[j] = temp;
+            return true;
         }
-        let stack = this.stack;
-        let temp = stack[i];
-        stack[i] = stack[j];
-        stack[j] = temp;
+        return false;
     },
 
-    inBound: function(i, j) {
+    inBound: function(i) {
         return i >= 0 && i < this.stack.length;
     },
 
