@@ -550,6 +550,7 @@ Spaces = new Lang.Class({
         global.screen.connect("workspace-added", Lang.bind(this, this.workspace_added))
         global.screen.connect("workspace-removed", Lang.bind(this, this.workspace_removed));
 
+        global.display.connect('window-created', Lang.bind(this, this._window_created));
     },
 
     add: function(workspace) {
@@ -579,7 +580,7 @@ Spaces = new Lang.Class({
         spaces.remove(workspace);
     },
 
-    first_frame: function(meta_window_actor) {
+    _first_frame: function(meta_window_actor) {
         meta_window_actor.disconnect('first_frame');
         let meta_window = meta_window_actor.meta_window;
         debug("first frame: setting initial position", meta_window)
@@ -600,10 +601,10 @@ Spaces = new Lang.Class({
         }
     },
 
-    window_created: function(display, meta_window, user_data) {
+    _window_created: function(display, meta_window, user_data) {
         debug('window-created', meta_window.title);
         let actor = meta_window.get_compositor_private();
-        actor.connect('first-frame', dynamic_function_ref('first_frame'));
+        actor.connect('first-frame', this._first_frame);
     }
 })
 
