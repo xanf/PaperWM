@@ -22,9 +22,88 @@ margin_tb = 2
 
 stack_margin = 75
 
+Spaces = new Lang.Class({
+    Name: 'Spaces',
+
+    spaces: [],
+
+    _init : function() {
+        // Initialize a space for all existing meta workspaces
+        for (let i=0; i < global.screen.n_workspaces; i++) {
+            this.spaces[i] = new Space(global.screen.get_workspace_by_index(i));
+        }
+    },
+
+    add: function(workspace) {
+        this.spaces[workspace.workspace_index] = workspace;
+    },
+
+    remove: function(workspace) {
+        this.spaces.splice(workspace.workspace_index, 1);
+    },
+
+    spaceOf: function(meta_window) {
+        let workspace = meta_window.get_workspace();
+        return this.spaces[workspace.workspace_index];
+    }
+})
+
+Space = new Lang.Class({
+    Name: 'Space',
+
+    // The stack of windows
+    stack: [],
+
+    // The associated MetaWorkspace
+    workspace: undefined,
+
+    // index of the last window on the left stack
+    leftStack: 0,
+
+    // index of the first window on the right stack
+    rightStack: 0,
+
+    _init: function(workspace) {
+        this.workspace = workspace;
+    },
+
+    moveIntoView: function(meta_window) {
+        ensure_viewport(meta_window);
+    },
+
+    // Get the index right of meta_window's index
+    rightOf: function(meta_window) {
+        return Math.min(this.columnOf(meta_window) + 1, this.stack.length - 1);
+    },
+
+    // insert `meta_window` at `index`
+    insertWindow: function(meta_window, index) {
+        // insert at the end by default
+        index = index || this.stack.length;
+        this.stack.splice(index, 0, meta_window);
+    },
+
+    removeWindow: function(meta_window) {
+        this.stack.splice(this.indexOf(meta_window), 1, meta_window);
+    },
+
+    // Get the index left of meta_window's index
+    leftOf: function(meta_window) {
+        return Math.max(this.columnOf(meta_window) - 1, 0);
+    },
+
+    indexOf: function(meta_window) {
+        return this.stack.indexOf(meta_window);
+    },
+
+    getWindow: function(index) {
+        return this.stack[index];
+    }
+})
+
 workspaces = []
 for (let i=0; i < global.screen.n_workspaces; i++) {
-    workspaces[i] = []
+    workspaces[i] = [];
 }
 
 function _repl() {
