@@ -22,105 +22,6 @@ margin_tb = 2
 
 stack_margin = 75
 
-Spaces = new Lang.Class({
-    Name: 'Spaces',
-
-    spaces: [],
-
-    _init : function() {
-        // Initialize a space for all existing meta workspaces
-        for (let i=0; i < global.screen.n_workspaces; i++) {
-            this.spaces[i] = new Space(global.screen.get_workspace_by_index(i));
-        }
-    },
-
-    add: function(workspace) {
-        this.spaces[workspace.workspace_index] = new Space(workspace);
-    },
-
-    remove: function(workspace) {
-        this.spaces.splice(workspace.workspace_index, 1);
-    },
-
-    spaceOf: function(meta_window) {
-        let workspace = meta_window.get_workspace();
-        return this.spaces[workspace.workspace_index];
-    }
-})
-
-Space = new Lang.Class({
-    Name: 'Space',
-
-    // The stack of windows
-    stack: [],
-
-    // The associated MetaWorkspace
-    workspace: undefined,
-
-    // The workspace index
-    index: undefined,
-
-    // index of the last window on the left stack
-    leftStack: 0,
-
-    // index of the first window on the right stack
-    rightStack: 0,
-
-    _init: function(workspace) {
-        this.workspace = workspace;
-        this.index = workspace.workspace_index;
-    },
-
-    moveIntoView: function(meta_window) {
-        ensure_viewport(meta_window);
-    },
-
-    // Get the index right of meta_window's index
-    rightOf: function(meta_window) {
-        return Math.min(this.columnOf(meta_window) + 1, this.stack.length - 1);
-    },
-
-    // insert `meta_window` at `index`
-    insertWindow: function(meta_window, index) {
-        // insert at the end by default
-        index = index || this.stack.length;
-        this.stack.splice(index, 0, meta_window);
-    },
-
-    removeWindow: function(meta_window) {
-        this.stack.splice(this.indexOf(meta_window), 1, meta_window);
-    },
-
-    swap: function(i, j) {
-        if (!inBound(i, j)) {
-            return false;
-        }
-        let stack = this.stack;
-        let temp = stack[i];
-        stack[i] = stack[j];
-        stack[j] = temp;
-    },
-
-    inBound: function(i, j) {
-        return i >= 0 && i < this.stack.length;
-    },
-
-    // Get the index left of meta_window's index
-    leftOf: function(meta_window) {
-        return Math.max(this.columnOf(meta_window) - 1, 0);
-    },
-
-    indexOf: function(meta_window) {
-        return this.stack.indexOf(meta_window);
-    },
-
-    getWindow: function(index) {
-        return this.stack[index];
-    }
-})
-
-spaces = new Spaces();
-
 function _repl() {
     add_all_from_workspace()
 
@@ -432,126 +333,6 @@ defwinprop({
     float: true
 })
 
-add_handler = (ws, meta_window) => {
-    debug("window-added", meta_window, meta_window.title, meta_window.window_type);
-    if (!add_filter(meta_window)) {
-        return;
-    }
-
-    let winprop = find_winprop(meta_window);
-    if (winprop) {
-        if(winprop.oneshot) {
-            // untested :)
-            winprops.splice(winprops.indexOf(winprop), 1);
-        }
-        if(winprop.float) {
-            // Let gnome-shell handle the placement
-            return;
-        }
-    }
-
-    let focus_i = focus();
-
-    // Should inspert at index 0 if focus() returns -1
-    let space = spaces.spaces[ws.workspace_index];
-    space.insertWindow(meta_window, focus_i + 1);
-
-    if (focus_i == -1) {
-        meta_window.scrollwm_initial_position = {x: 0, y:statusbar_height + margin_tb};
-    } else {
-        let frame = space.getWindow(focus_i).get_frame_rect()
-        meta_window.scrollwm_initial_position = {x:frame.x + frame.width + window_gap, y:statusbar_height + margin_tb};
-    }
-    // If window is receiving focus the focus handler will do the correct thing.
-    // Otherwise we need set the correct position:
-    // For new windows this must be done in 'first-frame' signal.
-    // Existing windows being moved need a new position in this workspace. This
-    // can be done here since the window is fully initialized.
-
-    // Maxmize height. Setting position here doesn't work... 
-    meta_window.move_resize_frame(true, 0, 0,
-                                  meta_window.get_frame_rect().width, global.screen_height - statusbar_height - margin_tb*2);
-    meta_window.connect("focus", focus_wrapper)
-}
-
-remove_handler = (ws, meta_window) => {
-    debug("window-removed", meta_window, meta_window.title);
-    // Note: If `meta_window` was closed and had focus at the time, the next
-    // window has already received the `focus` signal at this point.
-
-    let space = spaces.spaceOf(meta_window);
-    let removed_i = space.indexOf(meta_window)
-    if (removed_i < 0)
-        return
-    space.removeWindow(meta_window)
-
-    // Remove our signal handlers: Needed for non-closed windows.
-    // (closing a window seems to clean out it's signal handlers)
-    meta_window.disconnect(focus_wrapper);
-
-    // Re-layout: Needed if the removed window didn't have focus.
-    // Not sure if we can check if that was the case or not?
-    space.getWindow(Math.max(0, removed_i - 1)).activate(timestamp());
-    // Force a new ensure, since the focus_handler is run before window-removed
-    ensure_viewport(space.getWindow(focus()), true)
-}
-
-add_all_from_workspace = (workspace) => {
-    workspace = workspace || global.screen.get_active_workspace();
-    let windows = workspace.list_windows();
-
-    // On gnome-shell-restarts the windows are moved into the viewport, but
-    // they're moved minimally and the stacking is not changed, so the tiling
-    // order is preserved (sans full-width windows..)
-    function xz_comparator(windows) {
-        // Seems to be the only documented way to get stacking order?
-        // Could also rely on the MetaWindowActor's index in it's parent
-        // children array: That seem to correspond to clutters z-index (note:
-        // z_position is something else)
-        let z_sorted = global.display.sort_windows_by_stacking(windows);
-        function xkey(mw) {
-            let frame = mw.get_frame_rect();
-            if(frame.x <= 0)
-                return 0;
-            if(frame.x+frame.width == global.screen_width) {
-                return global.screen_width;
-            }
-            return frame.x;
-        }
-        // xorder: a|b c|d
-        // zorder: a d b c
-        return (a,b) => {
-            let ax = xkey(a);
-            let bx = xkey(b);
-            // Yes, this is not efficient
-            let az = z_sorted.indexOf(a);
-            let bz = z_sorted.indexOf(b);
-            let xcmp = ax - bx;
-            if (xcmp !== 0)
-                return xcmp;
-
-            if (ax === 0) {
-                // Left side: lower stacking first
-                return az - bz;
-            } else {
-                // Right side: higher stacking first
-                return bz - az;
-            }
-        };
-    }
-
-    windows.sort(xz_comparator(windows));
-
-    let tiling = spaces.spaces[workspace.workspace_index].stack;
-    windows.forEach((meta_window, i) => {
-        if(tiling.indexOf(meta_window) < 0 && add_filter(meta_window)) {
-            // Using add_handler is unreliable since it interacts with focus.
-            tiling.push(meta_window);
-            meta_window.connect("focus", focus_wrapper)
-        }
-    })
-}
-
 /**
  * Look up the function by name at call time. This makes it convenient to
  * redefine the function without re-registering all signal handler, keybindings,
@@ -608,9 +389,6 @@ global.display.connect('window-created', dynamic_function_ref('window_created'))
 workspace_added = (screen, index) => {
     let workspace = global.screen.get_workspace_by_index(index);
     spaces.add(workspace);
-    // Should move this into Spaces.add
-    workspace.connect("window-added", dynamic_function_ref("add_handler"))
-    workspace.connect("window-removed", dynamic_function_ref("remove_handler"));
     debug('workspace-added', index, workspace);
 
 }
@@ -624,16 +402,16 @@ workspace_removed = (screen, arg1, arg2) => {
 global.screen.connect("workspace-added", dynamic_function_ref('workspace_added'))
 global.screen.connect("workspace-removed", dynamic_function_ref('workspace_removed'));
 
-recover_all_tilings = function() {
-    for (let i=0; i < global.screen.n_workspaces; i++) {
-        let workspace = global.screen.get_workspace_by_index(i)
-        print("workspace: " + workspace)
-        workspace.connect("window-added", dynamic_function_ref("add_handler"))
-        workspace.connect("window-removed", dynamic_function_ref("remove_handler"));
-        add_all_from_workspace(workspace);
-    }
-}
-recover_all_tilings();
+// recover_all_tilings = function() {
+//     for (let i=0; i < global.screen.n_workspaces; i++) {
+//         let workspace = global.screen.get_workspace_by_index(i)
+//         print("workspace: " + workspace)
+//         workspace.connect("window-added", dynamic_function_ref("add_handler"))
+//         workspace.connect("window-removed", dynamic_function_ref("remove_handler"));
+//         add_all_from_workspace(workspace);
+//     }
+// }
+// recover_all_tilings();
 
 move_helper = (meta_window, delta) => {
     // NB: delta should be 1 or -1
@@ -865,3 +643,232 @@ Meta.keybindings_set_custom_handler("maximize-horizontally",
 // Must use `Meta.keybindings_set_custom_handler` to re-assign handler?
 set_action_handler("move-left", dynamic_function_ref("move_left"));
 set_action_handler("move-right", dynamic_function_ref("move_right"));
+
+
+Spaces = new Lang.Class({
+    Name: 'Spaces',
+
+    spaces: [],
+
+    _init : function() {
+        // Initialize a space for all existing meta workspaces
+        for (let i=0; i < global.screen.n_workspaces; i++) {
+            let workspace = global.screen.get_workspace_by_index(i);
+            this.spaces[i] = new Space(workspace);
+        }
+    },
+
+    add: function(workspace) {
+        this.spaces[workspace.workspace_index] = new Space(workspace);
+    },
+
+    remove: function(workspace) {
+        this.spaces.splice(workspace.workspace_index, 1);
+    },
+
+    spaceOf: function(meta_window) {
+        let workspace = meta_window.get_workspace();
+        return this.spaces[workspace.workspace_index];
+    }
+})
+
+Space = new Lang.Class({
+    Name: 'Space',
+
+    // The stack of windows
+    stack: [],
+
+    // The associated MetaWorkspace
+    workspace: undefined,
+
+    // The workspace index
+    index: undefined,
+
+    // index of the last window on the left stack
+    leftStack: 0,
+
+    // index of the first window on the right stack
+    rightStack: 0,
+
+    _init: function(workspace) {
+        this.workspace = workspace;
+        this.index = workspace.workspace_index;
+        // connect signals
+        workspace.connect("window-added", Lang.bind(this, this.windowAdded))
+        workspace.connect("window-removed", Lang.bind(this, this.windowAdded));
+        this._recover();
+    },
+
+    moveIntoView: function(meta_window) {
+        ensure_viewport(meta_window);
+    },
+
+    // Get the index right of meta_window's index
+    rightOf: function(meta_window) {
+        return Math.min(this.columnOf(meta_window) + 1, this.stack.length - 1);
+    },
+
+    // insert `meta_window` at `index`
+    insertWindow: function(meta_window, index) {
+        // insert at the end by default
+        index = index || this.stack.length;
+        this.stack.splice(index, 0, meta_window);
+    },
+
+    removeWindow: function(meta_window) {
+        this.stack.splice(this.indexOf(meta_window), 1, meta_window);
+    },
+
+    swap: function(i, j) {
+        if (!inBound(i, j)) {
+            return false;
+        }
+        let stack = this.stack;
+        let temp = stack[i];
+        stack[i] = stack[j];
+        stack[j] = temp;
+    },
+
+    inBound: function(i, j) {
+        return i >= 0 && i < this.stack.length;
+    },
+
+    // Get the index left of meta_window's index
+    leftOf: function(meta_window) {
+        return Math.max(this.columnOf(meta_window) - 1, 0);
+    },
+
+    indexOf: function(meta_window) {
+        return this.stack.indexOf(meta_window);
+    },
+
+    getWindow: function(index) {
+        return this.stack[index];
+    },
+
+    // Signals
+
+    windowAdded: function(ws, meta_window) {
+        debug("window-added", meta_window, meta_window.title, meta_window.window_type);
+        if (!add_filter(meta_window)) {
+            return;
+        }
+
+        let winprop = find_winprop(meta_window);
+        if (winprop) {
+            if(winprop.oneshot) {
+                // untested :)
+                winprops.splice(winprops.indexOf(winprop), 1);
+            }
+            if(winprop.float) {
+                // Let gnome-shell handle the placement
+                return;
+            }
+        }
+
+        let focus_i = focus();
+
+        // Should inspert at index 0 if focus() returns -1
+        let space = this.space;
+        space.insertWindow(meta_window, focus_i + 1);
+
+        if (focus_i == -1) {
+            meta_window.scrollwm_initial_position = {x: 0, y:statusbar_height + margin_tb};
+        } else {
+            let frame = space.getWindow(focus_i).get_frame_rect()
+            meta_window.scrollwm_initial_position = {x:frame.x + frame.width + window_gap, y:statusbar_height + margin_tb};
+        }
+        // If window is receiving focus the focus handler will do the correct thing.
+        // Otherwise we need set the correct position:
+        // For new windows this must be done in 'first-frame' signal.
+        // Existing windows being moved need a new position in this workspace. This
+        // can be done here since the window is fully initialized.
+
+        // Maxmize height. Setting position here doesn't work... 
+        meta_window.move_resize_frame(true, 0, 0,
+                                      meta_window.get_frame_rect().width, global.screen_height - statusbar_height - margin_tb*2);
+        meta_window.connect("focus", focus_wrapper)
+    },
+
+    windowRemoved: function(ws, meta_window) {
+        debug("window-removed", meta_window, meta_window.title);
+        // Note: If `meta_window` was closed and had focus at the time, the next
+        // window has already received the `focus` signal at this point.
+
+        let space = this.space;
+        let removed_i = space.indexOf(meta_window)
+        if (removed_i < 0)
+            return
+        space.removeWindow(meta_window)
+
+        // Remove our signal handlers: Needed for non-closed windows.
+        // (closing a window seems to clean out it's signal handlers)
+        meta_window.disconnect(focus_wrapper);
+
+        // Re-layout: Needed if the removed window didn't have focus.
+        // Not sure if we can check if that was the case or not?
+        space.getWindow(Math.max(0, removed_i - 1)).activate(timestamp());
+        // Force a new ensure, since the focus_handler is run before window-removed
+        ensure_viewport(space.getWindow(focus()), true)
+    },
+
+    _recover: function() {
+        let workspace = this.workspace;
+        let windows = workspace.list_windows();
+
+        // On gnome-shell-restarts the windows are moved into the viewport, but
+        // they're moved minimally and the stacking is not changed, so the tiling
+        // order is preserved (sans full-width windows..)
+        function xz_comparator(windows) {
+            // Seems to be the only documented way to get stacking order?
+            // Could also rely on the MetaWindowActor's index in it's parent
+            // children array: That seem to correspond to clutters z-index (note:
+            // z_position is something else)
+            let z_sorted = global.display.sort_windows_by_stacking(windows);
+            function xkey(mw) {
+                let frame = mw.get_frame_rect();
+                if(frame.x <= 0)
+                    return 0;
+                if(frame.x+frame.width == global.screen_width) {
+                    return global.screen_width;
+                }
+                return frame.x;
+            }
+            // xorder: a|b c|d
+            // zorder: a d b c
+            return (a,b) => {
+                let ax = xkey(a);
+                let bx = xkey(b);
+                // Yes, this is not efficient
+                let az = z_sorted.indexOf(a);
+                let bz = z_sorted.indexOf(b);
+                let xcmp = ax - bx;
+                if (xcmp !== 0)
+                    return xcmp;
+
+                if (ax === 0) {
+                    // Left side: lower stacking first
+                    return az - bz;
+                } else {
+                    // Right side: higher stacking first
+                    return bz - az;
+                }
+            };
+        }
+
+        windows.sort(xz_comparator(windows));
+
+        windows.forEach((meta_window, i) => {
+            if(this.indexOf(meta_window) < 0 && add_filter(meta_window)) {
+                // Using add_handler is unreliable since it interacts with focus.
+                this.insertWindow(meta_window);
+                meta_window.connect("focus", focus_wrapper)
+            }
+        })
+    }
+
+
+
+})
+
+spaces = new Spaces();
