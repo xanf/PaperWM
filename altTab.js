@@ -6,13 +6,10 @@ const Shell = imports.gi.Shell;
 
 const AltTab = imports.ui.altTab;
 const Main = imports.ui.main;
+
 WindowManager = imports.ui.windowManager;
 
-WindowManager.WindowManager.prototype._previewWorkspace = function(shellwm, from, to, direction) {
-    if (!Main.sessionMode.hasWorkspaces || !this._shouldAnimate()) {
-        shellwm.completed_switch_workspace();
-        return;
-    }
+WindowManager.WindowManager.prototype._previewWorkspace = function(from, to, direction) {
 
     let windows = global.get_window_actors();
 
@@ -128,7 +125,7 @@ WindowManager.WindowManager.prototype._previewWorkspaceDone = function() {
 
 LiveAltTab = Lang.Class({
     Name: 'LiveAltTab',
-    Extends: altTab.WindowSwitcherPopup,
+    Extends: AltTab.WindowSwitcherPopup,
 
     _getwindowList: function () {
         return global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null);
@@ -160,8 +157,7 @@ LiveAltTab = Lang.Class({
         let toIndex = to.get_workspace().workspace_index;
         if (toIndex !== fromIndex) {
             let direction = fromIndex < toIndex ? Meta.MotionDirection.DOWN : Meta.MotionDirection.UP;
-            Main.wm._previewWorkspace(global.window_manager,
-                                      from.get_workspace().workspace_index,
+            Main.wm._previewWorkspace(from.get_workspace().workspace_index,
                                       to.get_workspace().workspace_index,
                                       direction)
             this.switchedWorkspace = true;
