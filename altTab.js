@@ -89,9 +89,6 @@ WindowManager.WindowManager.prototype._previewWorkspace = function(shellwm, from
                        y: yDest,
                        time: 0.25,
                        transition: 'easeOutQuad',
-                       // onComplete: this._switchWorkspaceDone,
-                       // onCompleteScope: this,
-                       // onCompleteParams: [shellwm]
                      });
     Tweener.addTween(switchData.inGroup,
                      { x: 0,
@@ -101,21 +98,32 @@ WindowManager.WindowManager.prototype._previewWorkspace = function(shellwm, from
                      });
 }
 
-let injections = {};
 
-injections['_keyPressHandler'] = AltTab.WindowSwitcherPopup.prototype._keyPressHandler;
+WindowManager.WindowManager.prototype._previewWorkspaceDone = function() {
+    let switchData = this._switchData;
+    if (!switchData)
+        return;
+    this._switchData = null;
 
-// Main.wm._forcedWindowSwitcher = function(display, screen, window, binding) {
-//     /* prevent a corner case where both popups show up at once */
-//     if (this._workspaceSwitcherPopup != null)
-//         this._workspaceSwitcherPopup.destroy();
+    for (let i = 0; i < switchData.windows.length; i++) {
+        let w = switchData.windows[i];
+        if (w.window.is_destroyed()) // Window gone
+            continue;
+        if (w.window.get_parent() == switchData.outGroup) {
+            w.window.reparent(w.parent);
+            w.window.hide();
+        } else
+            w.window.reparent(w.parent);
+    }
+    Tweener.removeTweens(switchData.inGroup);
+    Tweener.removeTweens(switchData.outGroup);
+    switchData.inGroup.destroy();
+    switchData.outGroup.destroy();
+    switchData.movingWindowBin.destroy();
 
-//     let tabPopup = new AltTab.WindowSwitcherPopup();
-
-//     if (!tabPopup.show(binding.is_reversed(), binding.get_name(), binding.get_mask()))
-//         tabPopup.destroy();
-// };
-
+    if (this._movingWindow)
+        this._movingWindow = null;
+}
 
 
 LiveAltTab = Lang.Class({
@@ -135,13 +143,13 @@ LiveAltTab = Lang.Class({
             action = Meta.KeyBindingAction.SWITCH_WINDOWS_BACKWARD;
             break;
         }
-        return injections['_keyPressHandler'].call(this, keysym, action);
+        return this.parent(keysym, action)
     },
 
     _select: function(num) {
 
         if (this.switchedWorkspace) {
-            Main.wm._switchWorkspaceDone(global.window_manager);
+            Main.wm._previewWorkspaceDone(global.window_manager);
             this.switchedWorkspace = false;
         }
 
@@ -151,7 +159,7 @@ LiveAltTab = Lang.Class({
         let fromIndex = from.get_workspace().workspace_index;
         let toIndex = to.get_workspace().workspace_index;
         if (toIndex !== fromIndex) {
-            let direction = fromIndex > toIndex ? Meta.MotionDirection.DOWN : Meta.MotionDirection.UP;
+            let direction = fromIndex < toIndex ? Meta.MotionDirection.DOWN : Meta.MotionDirection.UP;
             Main.wm._previewWorkspace(global.window_manager,
                                       from.get_workspace().workspace_index,
                                       to.get_workspace().workspace_index,
@@ -168,7 +176,9 @@ LiveAltTab = Lang.Class({
     _finish: function() {
         this.parent();
 
-        Main.wm._switchWorkspaceDone(global.window_manager);
+        if (this.switchedWorkspace) {
+            Main.wm._previewWorkspaceDone(global.window_manager);
+        }
     }
 })
 
