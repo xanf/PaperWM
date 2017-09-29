@@ -2,12 +2,9 @@
 const Clutter = imports.gi.Clutter;
 const Lang = imports.lang;
 const Meta = imports.gi.Meta;
-const Shell = imports.gi.Shell;
-
 const AltTab = imports.ui.altTab;
 const Main = imports.ui.main;
-
-WindowManager = imports.ui.windowManager;
+let WindowManager = imports.ui.windowManager;
 
 WindowManager.WindowManager.prototype._previewWorkspace = function(from, to, direction) {
 
