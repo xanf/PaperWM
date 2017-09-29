@@ -169,9 +169,22 @@ LiveAltTab = Lang.Class({
     _finish: function() {
         this.parent();
 
+        this.was_accepted = true;
         if (this.switchedWorkspace) {
             Main.wm._previewWorkspaceDone(global.window_manager);
         }
+    },
+
+    _onDestroy: function() {
+        debug('#preview', 'onDestroy', this.was_accepted);
+        if(!this.was_accepted) {
+            if (this.switchedWorkspace) {
+                Main.wm._previewWorkspaceDone(global.window_manager);
+            }
+            // Select the starting window
+            this._select(0);
+        }
+        this.parent();
     }
 })
 
