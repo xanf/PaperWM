@@ -5,6 +5,8 @@ St = imports.gi.St;
 Workspace = imports.ui.workspace;
 Background = imports.ui.background;
 Meta = imports.gi.Meta;
+Main = imports.ui.main;
+Signals = imports.signals;
 
 calcOffset = function(metaWindow) {
     let buffer = metaWindow.get_buffer_rect();
@@ -72,16 +74,33 @@ Minimap = new Lang.Class({
     Name: 'Minimap',
 
     _init: function(space) {
-        this.actor = new Clutter.Actor({ name: "minimap-this" });
+        this.actor = new Clutter.Actor({ name: "minimap-actor" });
         this.space = space;
         this.minimapActor = new Clutter.Actor({ name: "minimap-container"} );
 
         this.clones = [];
-        this.actor.set_scale(0.1, 0.1);
-        this.actor.height = primary.height;
-        this.actor.width = primary.width;
-        this.actor.add_actor(this.minimapActor);
 
+        this.viewport = new Clutter.Actor({ name: "minimap-viewport" });
+        this.viewport.set_scale(0.1, 0.1);
+        this.viewport.height = primary.height;
+        this.viewport.width = primary.width;
+        this.viewport.add_actor(this.minimapActor);
+
+        this.actor.width = primary.width*0.1;
+        this.actor.height = primary.height*0.1+30;
+
+        let workspaceName = Meta.prefs_get_workspace_name(space.workspace.index());
+        this.label = new St.Label({ text: workspaceName })
+        this.label.y = primary.height*0.1
+        this.label.set_style("background-color: black")
+        
+        this.actor.add_child(this.viewport)
+        this.actor.add_child(this.label)
+        this.viewport.set_background_color(Clutter.Color.get_static(3))
+        this.popupLabel = new St.Label({ style: "background-color: black" });
+        this.popupLabel.x = 100;
+        this.popupLabel.y = -30;
+        this.actor.add_child(this.popupLabel);
     },
 
     createClones: function(windows) {
@@ -89,8 +108,25 @@ Minimap = new Lang.Class({
             let windowActor = mw.get_compositor_private()
             let clone = new Clutter.Clone({ source: windowActor });
             let container = new Clutter.Actor({ layout_manager: new WindowCloneLayout(),
-                                                name: "window-clone-container"
+                                                name: "window-clone-container",
+                                                reactive: true
                                               });
+            Main.layoutManager._trackActor(container)
+            let popupLabel = this.popupLabel;
+            container.connect("enter-event", () => {
+                popupLabel.text = mw.title;
+                popupLabel.show();
+                
+            });
+            container.connect("leave-event", () => {
+                popupLabel.text = "";
+                popupLabel.hide();
+            });
+            let minimapThis = this;
+            container.connect("button-press-event", () => {
+                debug("minimap", "item-activated");
+                minimapThis.emit("item-activated", this.space.indexOf(mw));
+            });
             clone.meta_window = mw;
 
             container.add_actor(clone);
@@ -251,6 +287,8 @@ Minimap = new Lang.Class({
     },
 })
 
+Signals.addSignalMethods(Minimap.prototype);
+
 
 MultiMap = new Lang.Class({
     Name: 'MultiMap',
@@ -336,6 +374,9 @@ MultiMap = new Lang.Class({
         background.first_child.width = wrapper.width;
         background.first_child.height = wrapper.height;
         minimap.actor.set_position(10, 8);
+        minimap.connect("item-activated", (unused, i) => {
+            this.emit("item-activated", i);
+        });
         this.minimaps.push(minimap);
     },
 
@@ -426,5 +467,4 @@ MultiMap = new Lang.Class({
     }
 })
 
-const Signals = imports.signals;
 Signals.addSignalMethods(MultiMap.prototype);

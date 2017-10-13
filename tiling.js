@@ -783,6 +783,7 @@ PreviewedWindowNavigator = new Lang.Class({
                 this._switcherList.getSelected().sync(newX);
             }
         }
+        this._switcherList.getSelected().label.text = this.space.selectedWindow.title;
         this._selectedIndex = index;
         this._switcherList.highlight(index);
     },
