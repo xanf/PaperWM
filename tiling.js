@@ -8,6 +8,7 @@ var St = imports.gi.St;
 var Main = imports.ui.main;
 var Shell = imports.gi.Shell;
 var Gio = imports.gi.Gio;
+var Signals = imports.signals;
 var utils = Extension.imports.utils;
 var debug = utils.debug;
 
@@ -280,6 +281,7 @@ class Space extends Array {
         workspace.disconnect(this.removeSignal);
     }
 }
+Signals.addSignalMethods(Space.prototype);
 
 /**
    A `Map` to store all `Spaces`'s, indexed by the corresponding workspace.
