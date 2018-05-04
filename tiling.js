@@ -134,15 +134,15 @@ class Space extends Array {
     _moveDone() {
         log('move-done');
         if (Navigator.navigating) {
-            this._moving = false;
+            this.delay = true;
             return;
         }
-        // this.visible.forEach(w => {
-        //     let actor = w.get_compositor_private();
-        //     w.clone.hide();
-        //     actor && actor.show();
-        // });
-        this.visible = [];
+        log('activating actors', this.visible.map(w => w.title));
+        this.visible.forEach(w => {
+            let actor = w.get_compositor_private();
+            w.clone.hide();
+            actor && actor.show();
+        });
     }
 
     setMonitor(monitor, animate) {
@@ -979,6 +979,7 @@ function ensureViewport(meta_window, space, force) {
     }
 
     space.moving = meta_window;
+    space.delay = false;
     move_to(space, meta_window,
             { x, y,
               onComplete: () => {
@@ -1018,6 +1019,10 @@ function move(meta_window, space,
     clone.show();
     actor.hide();
 
+    if (visible) {
+        space.visible.push(meta_window);
+    }
+
     // Move the frame before animation to indicate where it's actually going.
     // The animation being purely cosmetic.
     meta_window.move_frame(true,
@@ -1040,11 +1045,6 @@ function move(meta_window, space,
                           // process of closing
                           if(!meta_window.get_compositor_private())
                               return;
-                          let monitor = space.monitor;
-                          if (visible && !Navigator.navigating) {
-                              clone.hide();
-                              actor.show();
-                          }
                           onComplete();
                       }
                      });
@@ -1054,6 +1054,9 @@ function move(meta_window, space,
 // Move @meta_window to x, y and propagate the change in @space
 function move_to(space, meta_window, { x, y, delay, transition,
                                          onComplete, onStart }) {
+
+    space.visible = [];
+
     move(meta_window, space, { x, y
                                , onComplete
                                , onStart
