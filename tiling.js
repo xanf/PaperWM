@@ -82,6 +82,10 @@ class Space extends Array {
             workspace.connect("window-removed",
                               utils.dynamic_function_ref("remove_handler", Me));
 
+        // The windows that should be represented by their WindowActor
+        this.visible = [];
+        this._moveDoneId = this.connect('move-done', this._moveDone.bind(this));
+
         let clip = new Clutter.Actor();
         this.clip = clip;
         let actor = new Clutter.Actor();
@@ -125,6 +129,20 @@ class Space extends Array {
 
         this.addAll(oldSpaces.get(workspace));
         oldSpaces.delete(workspace);
+    }
+
+    _moveDone() {
+        log('move-done');
+        if (Navigator.navigating) {
+            this._moving = false;
+            return;
+        }
+        // this.visible.forEach(w => {
+        //     let actor = w.get_compositor_private();
+        //     w.clone.hide();
+        //     actor && actor.show();
+        // });
+        this.visible = [];
     }
 
     setMonitor(monitor, animate) {
@@ -279,6 +297,7 @@ class Space extends Array {
         debug('destroy', Meta.prefs_get_workspace_name(workspace.index()));
         workspace.disconnect(this.addSignal);
         workspace.disconnect(this.removeSignal);
+        this.disconnect(this._moveDoneId);
     }
 }
 Signals.addSignalMethods(Space.prototype);
@@ -964,6 +983,7 @@ function ensureViewport(meta_window, space, force) {
             { x, y,
               onComplete: () => {
                   space.moving = false;
+                  space.emit('move-done');
                   if (!Navigator.navigating)
                       Meta.enable_unredirect_for_screen(global.screen);
               },
