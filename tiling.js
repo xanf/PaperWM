@@ -335,7 +335,9 @@ class Spaces extends Map {
         this.displaySignals = [
             global.display.connect(
                 'window-created',
-                utils.dynamic_function_ref('window_created', this))
+                utils.dynamic_function_ref('window_created', this)),
+            global.display.connect('grab-op-begin', grabBegin),
+            global.display.connect('grab-op-end', grabEnd),
         ];
 
         // Clone and hook up existing windows
@@ -588,8 +590,6 @@ function registerWindow(metaWindow) {
     metaWindow[signals] = [
         metaWindow.connect("focus", focus_wrapper),
         metaWindow.connect('notify::minimized', minimizeWrapper),
-        metaWindow.connect('size-changed', sizeHandler),
-        metaWindow.connect('position-changed', moveHandler),
         metaWindow.connect('notify::fullscreen', fullscreenWrapper)
     ];
     actor[signals] = [
@@ -599,9 +599,10 @@ function registerWindow(metaWindow) {
 
 
 // Symbol to retrieve the focus handler id
-var signals, oldSpaces, backgroundGroup;
+var signals, grabSignals, oldSpaces, backgroundGroup;
 function init() {
     signals = Symbol();
+    grabSignals = [];
     oldSpaces = new Map();
 
     backgroundGroup = global.window_group.first_child;
@@ -1074,12 +1075,12 @@ function move(meta_window, space,
 // Move @meta_window to x, y and propagate the change in @space
 function move_to(space, meta_window, { x, y, delay, transition,
                                        onComplete, onStart, gap,
-                                       noAnimate }) {
+                                       noAnimate, noMove }) {
 
     space.visible = [];
     space.delayed = false;
 
-    move(meta_window, space, { x, y
+    !noMove && move(meta_window, space, { x, y
                                , onComplete
                                , onStart
                                , delay
@@ -1162,35 +1163,27 @@ function move_to(space, meta_window, { x, y, delay, transition,
     }
 }
 
-// `MetaWindow::size-changed` handling
-function sizeHandler(metaWindow) {
-    debug('size-changed', metaWindow.title);
-    let space = spaces.spaceOfWindow(metaWindow);
-    if (space.selectedWindow !== metaWindow)
-        return;
-
-    let frame = metaWindow.get_frame_rect();
-    let monitor = space.monitor;
-    move_to(space, metaWindow, {x: frame.x - monitor.x, y: frame.y - monitor.y,
-                                onComplete: () => space.emit('move-done')});
-    Tweener.removeTweens(space.selection);
-    space.selection.width = frame.width + prefs.window_gap;
-    space.selection.x = frame.x - Math.round(prefs.window_gap/2);
+function grabBegin(screen, display, metaWindow, type) {
+    grabSignals = [
+        metaWindow.connect('size-changed', grabHandler),
+        metaWindow.connect('position-changed', grabHandler),
+    ];
 }
 
-function moveHandler(metaWindow) {
+function grabEnd(screen, display, metaWindow, type) {
+    grabSignals.forEach(id => metaWindow.disconnect(id));
     let space = spaces.spaceOfWindow(metaWindow);
-    if (space.selectedWindow !== metaWindow
-        || space.moving === metaWindow)
-        return;
+    space && space.emit('move-done');
+}
 
+// `MetaWindow::size-changed` handling
+function grabHandler(metaWindow) {
+    let space = spaces.spaceOfWindow(metaWindow);
     let frame = metaWindow.get_frame_rect();
     let monitor = space.monitor;
-    move_to(space, metaWindow,
-            { x: frame.x - monitor.x,
-              y: panelBox.height + prefs.vertical_margin,
-              noAnimate: true });
-    space.emit('move-done');
+    move_to(space, metaWindow, { x: frame.x - monitor.x,
+                                 y: panelBox.height + prefs.vertical_margin,
+                                 noAnimate: true });
     Tweener.removeTweens(space.selection);
     space.selection.width = frame.width + prefs.window_gap;
     space.selection.x = frame.x - Math.round(prefs.window_gap/2);
@@ -1237,12 +1230,34 @@ let minimizeWrapper = utils.dynamic_function_ref('minimizeHandler', Me);
 
 function fullscreenHandler(metaWindow) {
     let space = spaces.spaceOfWindow(metaWindow);
-    if (space.selectedWindow !== metaWindow)
-        return;
 
+    let signal;
+    let handler = (metaWindow) => {
+        metaWindow.disconnect(signal);
+        let frame = metaWindow.get_frame_rect();
+        let monitor = space.monitor;
+        move_to(space, metaWindow, { x: frame.x - monitor.x,
+                                     y: frame.y, noMove: true,
+                                     onComplete: () => space.emit('move-done')});
+        Tweener.removeTweens(space.selection);
+        space.selection.width = frame.width + prefs.window_gap;
+        space.selection.x = frame.x - Math.round(prefs.window_gap/2);
+
+    };
+
+    let frame = metaWindow.get_frame_rect();
     if (metaWindow.fullscreen) {
+        // Some windows have already changed size on notify::fullscreen
+        if (frame.width === space.width && frame.height === space.height)
+            handler(metaWindow);
+        else // While others haven't
+            signal = metaWindow.connect('size-changed', handler);
         TopBar.hide();
     } else {
+        if (frame.width === space.width && frame.height === space.height)
+            signal = metaWindow.connect('size-changed', handler);
+        else
+            handler(metaWindow);
         TopBar.show();
     }
 }
@@ -1354,6 +1369,12 @@ function toggleMaximizeHorizontally(metaWindow) {
     metaWindow = metaWindow || global.display.focus_window;
     let monitor = Main.layoutManager.monitors[metaWindow.get_monitor()];
 
+    let signal = metaWindow.connect('size-changed', (metaWindow) => {
+        metaWindow.disconnect(signal);
+        let space = spaces.spaceOfWindow(metaWindow);
+        ensureViewport(metaWindow, space, true);
+    });
+
     // TODO: make some sort of animation
     // Note: should investigate best-practice for attaching extension-data to meta_windows
     if(metaWindow.unmaximizedRect) {
@@ -1421,7 +1442,11 @@ function cycleWindowWidth(metaWindow) {
         nextX = monitor.x+monitor.width - minimumMargin - nextW;
     }
 
-    // WEAKNESS: When the navigator is open the window is not moved until the navigator is closed
+    let signal = metaWindow.connect('size-changed', (metaWindow) => {
+        metaWindow.disconnect(signal);
+        let space = spaces.spaceOfWindow(metaWindow);
+        ensureViewport(metaWindow, space, true);
+    });
     metaWindow.move_resize_frame(true, nextX, frame.y, nextW, frame.height);
 
     delete metaWindow.unmaximized_rect;
