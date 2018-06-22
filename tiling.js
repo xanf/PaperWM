@@ -1164,6 +1164,9 @@ function move_to(space, meta_window, { x, y, delay, transition,
 }
 
 function grabBegin(screen, display, metaWindow, type) {
+    let space = spaces.spaceOfWindow(metaWindow);
+    if (!space.includes(metaWindow))
+        return;
     grabSignals = [
         metaWindow.connect('size-changed', grabHandler),
         metaWindow.connect('position-changed', grabHandler),
@@ -1173,7 +1176,7 @@ function grabBegin(screen, display, metaWindow, type) {
 function grabEnd(screen, display, metaWindow, type) {
     grabSignals.forEach(id => metaWindow.disconnect(id));
     let space = spaces.spaceOfWindow(metaWindow);
-    space && space.emit('move-done');
+    ensureViewport(metaWindow, space, true);
 }
 
 // `MetaWindow::size-changed` handling
@@ -1182,7 +1185,7 @@ function grabHandler(metaWindow) {
     let frame = metaWindow.get_frame_rect();
     let monitor = space.monitor;
     move_to(space, metaWindow, { x: frame.x - monitor.x,
-                                 y: panelBox.height + prefs.vertical_margin,
+                                 y: frame.y - monitor.y,
                                  noAnimate: true });
     Tweener.removeTweens(space.selection);
     space.selection.width = frame.width + prefs.window_gap;
